@@ -280,7 +280,10 @@ class TushareFetcher(BaseFetcher):
         # Regular stocks
         # Shanghai: 600xxx, 601xxx, 603xxx, 688xxx (STAR Market)
         # Shenzhen: 000xxx, 002xxx, 300xxx (ChiNext)
-        if code.startswith(('600', '601', '603', '688')):
+        
+        if code.startswith(('hk', 'HK')):
+            return f"{code.replace('HK', '').replace('hk', '')}.HK"
+        elif code.startswith(('600', '601', '603', '688')):
             return f"{code}.SH"
         elif code.startswith(('000', '002', '300')):
             return f"{code}.SZ"
