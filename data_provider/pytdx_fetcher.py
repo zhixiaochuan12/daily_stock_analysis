@@ -29,7 +29,12 @@ from tenacity import (
     before_sleep_log,
 )
 
-from .base import BaseFetcher, DataFetchError, STANDARD_COLUMNS
+try:
+    from .base import BaseFetcher, DataFetchError, STANDARD_COLUMNS
+except ImportError:
+    # Support running as a standalone script
+    from base import BaseFetcher, DataFetchError, STANDARD_COLUMNS
+
 import os
 
 logger = logging.getLogger(__name__)

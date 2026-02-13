@@ -40,12 +40,21 @@ from tenacity import (
     before_sleep_log,
 )
 
-from .base import BaseFetcher, DataFetchError, RateLimitError, STANDARD_COLUMNS
-from .realtime_types import (
-    UnifiedRealtimeQuote, ChipDistribution, RealtimeSource,
-    get_realtime_circuit_breaker, get_chip_circuit_breaker,
-    safe_float, safe_int  # 使用统一的类型转换函数
-)
+try:
+    from .base import BaseFetcher, DataFetchError, RateLimitError, STANDARD_COLUMNS
+    from .realtime_types import (
+        UnifiedRealtimeQuote, ChipDistribution, RealtimeSource,
+        get_realtime_circuit_breaker, get_chip_circuit_breaker,
+        safe_float, safe_int  # 使用统一的类型转换函数
+    )
+except ImportError:
+    # Support running as a standalone script
+    from base import BaseFetcher, DataFetchError, RateLimitError, STANDARD_COLUMNS
+    from realtime_types import (
+        UnifiedRealtimeQuote, ChipDistribution, RealtimeSource,
+        get_realtime_circuit_breaker, get_chip_circuit_breaker,
+        safe_float, safe_int
+    )
 
 
 # 保留旧的 RealtimeQuote 别名，用于向后兼容

@@ -28,8 +28,14 @@ from tenacity import (
     before_sleep_log,
 )
 
-from .base import BaseFetcher, DataFetchError, STANDARD_COLUMNS
-from .realtime_types import UnifiedRealtimeQuote, RealtimeSource
+try:
+    from .base import BaseFetcher, DataFetchError, STANDARD_COLUMNS
+    from .realtime_types import UnifiedRealtimeQuote, RealtimeSource
+except ImportError:
+    # Support running as a standalone script
+    from base import BaseFetcher, DataFetchError, STANDARD_COLUMNS
+    from realtime_types import UnifiedRealtimeQuote, RealtimeSource
+
 import os
 
 logger = logging.getLogger(__name__)

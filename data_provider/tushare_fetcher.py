@@ -31,10 +31,22 @@ from tenacity import (
     before_sleep_log,
 )
 
-from .base import BaseFetcher, DataFetchError, RateLimitError, STANDARD_COLUMNS
-from .realtime_types import UnifiedRealtimeQuote
-from src.config import get_config
+try:
+    from .base import BaseFetcher, DataFetchError, RateLimitError, STANDARD_COLUMNS
+    from .realtime_types import UnifiedRealtimeQuote
+except ImportError:
+    # Support running as a standalone script
+    from base import BaseFetcher, DataFetchError, RateLimitError, STANDARD_COLUMNS
+    from realtime_types import UnifiedRealtimeQuote
+
 import os
+import sys
+
+# Ensure src module can be imported when running standalone
+if __name__ == "__main__":
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from src.config import get_config
 
 logger = logging.getLogger(__name__)
 
@@ -291,6 +303,32 @@ class TushareFetcher(BaseFetcher):
             logger.warning(f"无法确定股票 {code} 的市场，默认使用深市")
             return f"{code}.SZ"
     
+    def _is_hk_code(self, stock_code: str) -> bool:
+        """
+        Check if the code is a Hong Kong stock code.
+        
+        HK stock code patterns:
+        - 5-digit code starting with 0: 00700, 02513
+        - Code with .HK suffix: 00700.HK
+        - Code with hk prefix: hk00700
+        """
+        code = stock_code.strip().upper()
+        
+        # Check for .HK suffix
+        if code.endswith('.HK'):
+            return True
+        
+        # Check for hk prefix
+        if code.startswith('HK') and len(code) >= 5:
+            return True
+        
+        # Check for 5-digit code starting with 0 (e.g., 00700, 02513)
+        clean_code = code.split('.')[0].replace('HK', '').replace('hk', '')
+        if clean_code.isdigit() and len(clean_code) == 5 and clean_code.startswith('0'):
+            return True
+        
+        return False
+    
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=30),
@@ -304,6 +342,7 @@ class TushareFetcher(BaseFetcher):
         根据代码类型选择不同接口：
         - 普通股票：daily()
         - ETF 基金：fund_daily()
+        - 港股：hk_daily()
         
         流程：
         1. 检查 API 是否可用
@@ -329,12 +368,28 @@ class TushareFetcher(BaseFetcher):
         ts_start = start_date.replace('-', '')
         ts_end = end_date.replace('-', '')
         
+        # Determine API interface based on stock type
         is_etf = _is_etf_code(stock_code)
-        api_name = "fund_daily" if is_etf else "daily"
+        is_hk = self._is_hk_code(stock_code)
+        
+        if is_hk:
+            api_name = "hk_daily"
+        elif is_etf:
+            api_name = "fund_daily"
+        else:
+            api_name = "daily"
+        
         logger.debug(f"调用 Tushare {api_name}({ts_code}, {ts_start}, {ts_end})")
         
         try:
-            if is_etf:
+            if is_hk:
+                # Hong Kong stocks use hk_daily interface
+                df = self._api.hk_daily(
+                    ts_code=ts_code,
+                    start_date=ts_start,
+                    end_date=ts_end,
+                )
+            elif is_etf:
                 # ETF uses fund_daily interface
                 df = self._api.fund_daily(
                     ts_code=ts_code,
@@ -408,7 +463,10 @@ class TushareFetcher(BaseFetcher):
         """
         获取股票名称
         
-        使用 Tushare 的 stock_basic 接口获取股票基本信息
+        使用 Tushare 的接口获取股票基本信息：
+        - A股/B股：stock_basic
+        - ETF：fund_basic
+        - 港股：hk_basic
         
         Args:
             stock_code: 股票代码
@@ -435,13 +493,21 @@ class TushareFetcher(BaseFetcher):
             # 转换代码格式
             ts_code = self._convert_stock_code(stock_code)
             
-            # ETF uses fund_basic, regular stocks use stock_basic
-            if _is_etf_code(stock_code):
+            # Choose interface based on stock type
+            if self._is_hk_code(stock_code):
+                # Hong Kong stocks use hk_basic
+                df = self._api.hk_basic(
+                    ts_code=ts_code,
+                    fields='ts_code,name'
+                )
+            elif _is_etf_code(stock_code):
+                # ETF uses fund_basic
                 df = self._api.fund_basic(
                     ts_code=ts_code,
                     fields='ts_code,name'
                 )
             else:
+                # Regular stocks use stock_basic
                 df = self._api.stock_basic(
                     ts_code=ts_code,
                     fields='ts_code,name'
@@ -770,7 +836,10 @@ if __name__ == "__main__":
     fetcher = TushareFetcher()
     
     try:
-        # 测试历史数据
+        # 测试 A 股历史数据
+        print("=" * 50)
+        print("测试 A 股数据获取（茅台 600519）")
+        print("=" * 50)
         df = fetcher.get_daily_data('600519')  # 茅台
         print(f"获取成功，共 {len(df)} 条数据")
         print(df.tail())
@@ -778,6 +847,17 @@ if __name__ == "__main__":
         # 测试股票名称
         name = fetcher.get_stock_name('600519')
         print(f"股票名称: {name}")
+        
+        # 测试港股历史数据
+        print("\n" + "=" * 50)
+        print("测试港股数据获取（腾讯控股 00700.HK）")
+        print("=" * 50)
+        df_hk = fetcher.get_daily_data('00700.HK')  # 腾讯控股
+        print(f"获取成功，共 {len(df_hk)} 条数据")
+        print(df_hk.tail())
+        
+        name_hk = fetcher.get_stock_name('00700.HK')
+        print(f"股票名称: {name_hk}")
         
     except Exception as e:
         print(f"获取失败: {e}")
