@@ -34,6 +34,7 @@
 | 分析 | 多维度分析 | 技术面 + 筹码分布 + 舆情情报 + 实时行情 |
 | 市场 | 全球市场 | 支持 A股、港股、美股 |
 | 复盘 | 大盘复盘 | 每日市场概览、板块涨跌、北向资金 |
+| 监控 | 实时监控 | 定期扫描热门板块，自动分析涨跌幅TopK股票 |
 | 回测 | AI 回测验证 | 自动评估历史分析准确率，方向胜率、止盈止损命中率 |
 | 推送 | 多渠道通知 | 企业微信、飞书、Telegram、钉钉、邮件、Pushover |
 | 自动化 | 定时运行 | GitHub Actions 定时执行，无需服务器 |
@@ -121,6 +122,23 @@
 | `TUSHARE_TOKEN` | [Tushare Pro](https://tushare.pro/weborder/#/login?reg=834638 ) Token | 可选 |
 | `WECHAT_MSG_TYPE` | 企微消息类型，默认 markdown，支持配置 text 类型，发送纯 markdown 文本 | 可选 |
 
+<details>
+<summary><b>实时监控配置</b>（点击展开，新增功能）</summary>
+
+| Secret 名称 | 说明 | 默认值 |
+|------------|------|--------|
+| `REALTIME_MONITOR_ENABLED` | 启用实时监控模式 | `false` |
+| `REALTIME_MONITOR_INTERVAL` | 监控间隔（分钟） | `10` |
+| `REALTIME_MONITOR_TOPK` | 分析涨跌幅TopK股票数量 | `10` |
+| `REALTIME_MONITOR_HOT_SECTORS_NUM` | 跟踪热门板块数量 | `3` |
+| `REALTIME_MONITOR_TYPE` | 监控类型：`gainers`(涨幅) / `losers`(跌幅) / `both`(涨跌) | `both` |
+| `REALTIME_MONITOR_TRADING_HOURS_ONLY` | 仅交易时段运行 | `true` |
+| `REALTIME_MONITOR_MIN_CHANGE_PCT` | 最小涨跌幅阈值（%） | `3.0` |
+
+> 实时监控功能会定期扫描热门板块，自动识别涨跌幅TopK股票并触发分析。可与定时任务模式同时运行。
+
+</details>
+
 #### 3. 启用 Actions
 
 `Actions` 标签 → `I understand my workflows, go ahead and enable them`
@@ -147,6 +165,15 @@ cp .env.example .env && vim .env
 
 # 运行分析
 python main.py
+
+# 启用实时监控模式（每10分钟扫描热门板块，分析涨跌幅TopK股票）
+python main.py --realtime-monitor
+
+# 同时启用定时任务和实时监控
+python main.py --schedule --realtime-monitor
+
+# 测试模式：在非交易时段也能测试实时监控功能（Debug 模式会自动允许非交易时段运行）
+python main.py --realtime-monitor --debug
 ```
 
 > Docker 部署、定时任务配置请参考 [完整指南](docs/full-guide.md)

@@ -170,6 +170,15 @@ class Config:
     schedule_enabled: bool = False            # 是否启用定时任务
     schedule_time: str = "18:00"              # 每日推送时间（HH:MM 格式）
     market_review_enabled: bool = True        # 是否启用大盘复盘
+    
+    # === 实时监控配置 ===
+    realtime_monitor_enabled: bool = False    # 是否启用实时监控
+    realtime_monitor_interval: int = 10       # 监控间隔（分钟）
+    realtime_monitor_topk: int = 10           # TopK股票数量
+    realtime_monitor_hot_sectors_num: int = 3  # 热门板块数量
+    realtime_monitor_type: str = "both"       # 监控类型: gainers/losers/both
+    realtime_monitor_trading_hours_only: bool = True  # 仅交易时段运行
+    realtime_monitor_min_change_pct: float = 3.0  # 最小涨跌幅阈值（%）
 
     # === 实时行情增强数据配置 ===
     # 实时行情开关（关闭后使用历史收盘价进行分析）
@@ -445,7 +454,15 @@ class Config:
             # - tushare: Tushare Pro，需要2000积分，数据全面
             realtime_source_priority=cls._resolve_realtime_source_priority(),
             realtime_cache_ttl=int(os.getenv('REALTIME_CACHE_TTL', '600')),
-            circuit_breaker_cooldown=int(os.getenv('CIRCUIT_BREAKER_COOLDOWN', '300'))
+            circuit_breaker_cooldown=int(os.getenv('CIRCUIT_BREAKER_COOLDOWN', '300')),
+            # 实时监控配置
+            realtime_monitor_enabled=os.getenv('REALTIME_MONITOR_ENABLED', 'false').lower() == 'true',
+            realtime_monitor_interval=int(os.getenv('REALTIME_MONITOR_INTERVAL', '10')),
+            realtime_monitor_topk=int(os.getenv('REALTIME_MONITOR_TOPK', '10')),
+            realtime_monitor_hot_sectors_num=int(os.getenv('REALTIME_MONITOR_HOT_SECTORS_NUM', '3')),
+            realtime_monitor_type=os.getenv('REALTIME_MONITOR_TYPE', 'both').lower(),
+            realtime_monitor_trading_hours_only=os.getenv('REALTIME_MONITOR_TRADING_HOURS_ONLY', 'true').lower() == 'true',
+            realtime_monitor_min_change_pct=float(os.getenv('REALTIME_MONITOR_MIN_CHANGE_PCT', '3.0'))
         )
     
     @classmethod

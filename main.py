@@ -66,6 +66,7 @@ def parse_arguments() -> argparse.Namespace:
   python main.py --single-notify    # 启用单股推送模式（每分析完一只立即推送）
   python main.py --schedule         # 启用定时任务模式
   python main.py --market-review    # 仅运行大盘复盘
+  python main.py --realtime-monitor # 启用实时监控模式（定期扫描热门板块）
         '''
     )
 
@@ -193,6 +194,12 @@ def parse_arguments() -> argparse.Namespace:
         '--backtest-force',
         action='store_true',
         help='强制回测（即使已有回测结果也重新计算）'
+    )
+
+    parser.add_argument(
+        '--realtime-monitor',
+        action='store_true',
+        help='启用实时监控模式（定期扫描热门板块，分析涨跌幅TopK股票）'
     )
 
     return parser.parse_args()
@@ -521,7 +528,49 @@ def main() -> int:
             )
             return 0
         
-        # 模式2: 定时任务模式
+        # 模式2: 实时监控模式
+        if args.realtime_monitor or config.realtime_monitor_enabled:
+            logger.info("模式: 实时监控")
+            logger.info(f"监控间隔: {config.realtime_monitor_interval} 分钟")
+            logger.info(f"TopK: {config.realtime_monitor_topk}")
+            logger.info(f"监控类型: {config.realtime_monitor_type}")
+            
+            from src.core.realtime_monitor import RealtimeStockMonitor
+            
+            monitor = RealtimeStockMonitor(config)
+            
+            # 如果同时启用了定时任务，需要在后台线程运行监控
+            if args.schedule or config.schedule_enabled:
+                import threading
+                logger.info("检测到定时任务模式，实时监控将在后台线程运行")
+                
+                def run_monitor():
+                    try:
+                        monitor.run()
+                    except Exception as e:
+                        logger.exception(f"实时监控线程异常: {e}")
+                
+                monitor_thread = threading.Thread(target=run_monitor, daemon=True)
+                monitor_thread.start()
+                
+                # 继续执行定时任务逻辑
+                from src.scheduler import run_with_schedule
+                
+                def scheduled_task():
+                    run_full_analysis(config, args, stock_codes)
+                
+                run_with_schedule(
+                    task=scheduled_task,
+                    schedule_time=config.schedule_time,
+                    run_immediately=True
+                )
+            else:
+                # 仅实时监控模式，阻塞运行
+                monitor.run()
+            
+            return 0
+        
+        # 模式3: 定时任务模式
         if args.schedule or config.schedule_enabled:
             logger.info("模式: 定时任务")
             logger.info(f"每日执行时间: {config.schedule_time}")

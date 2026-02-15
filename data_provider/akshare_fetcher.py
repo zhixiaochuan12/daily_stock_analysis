@@ -1530,6 +1530,102 @@ class AkshareFetcher(BaseFetcher):
             logger.error(f"[Akshare] 新浪接口获取板块排行也失败: {e}")
             return None
 
+    def get_sector_constituent_stocks(self, sector_name: str) -> List[Dict[str, Any]]:
+        """
+        Get constituent stocks of a sector/industry.
+        
+        Args:
+            sector_name: Sector/industry name (e.g., "芯片", "新能源")
+            
+        Returns:
+            List of stock dicts with keys: code, name, change_pct, etc.
+            Returns empty list if failed.
+        """
+        import akshare as ak
+        
+        try:
+            self._set_random_user_agent()
+            self._enforce_rate_limit()
+            
+            # First, get sector list to find the symbol
+            logger.info(f"[API调用] 查找板块 '{sector_name}' 的代码...")
+            df_sectors = ak.stock_board_industry_name_em()
+            
+            if df_sectors is None or df_sectors.empty:
+                logger.warning(f"[Akshare] 无法获取板块列表")
+                return []
+            
+            # Find matching sector by name
+            sector_row = None
+            for _, row in df_sectors.iterrows():
+                if sector_name in str(row.get('板块名称', '')):
+                    sector_row = row
+                    break
+            
+            if sector_row is None:
+                logger.warning(f"[Akshare] 未找到板块 '{sector_name}'")
+                return []
+            
+            # Get sector symbol (板块代码)
+            sector_code = sector_row.get('板块代码') or sector_row.get('代码')
+            if not sector_code:
+                logger.warning(f"[Akshare] 板块 '{sector_name}' 无代码信息")
+                return []
+            
+            # Get constituent stocks
+            logger.info(f"[API调用] ak.stock_board_industry_cons_em(symbol='{sector_code}') 获取板块成分股...")
+            df_stocks = ak.stock_board_industry_cons_em(symbol=str(sector_code))
+            
+            if df_stocks is None or df_stocks.empty:
+                logger.warning(f"[Akshare] 板块 '{sector_name}' 无成分股数据")
+                return []
+            
+            # Extract relevant fields
+            result = []
+            for _, row in df_stocks.iterrows():
+                # Map column names (may vary)
+                code = str(row.get('代码', row.get('股票代码', ''))).strip()
+                name = str(row.get('名称', row.get('股票名称', ''))).strip()
+                
+                # Get change_pct from various possible column names
+                change_pct = None
+                for col in ['涨跌幅', 'change_pct', '涨幅', 'pct_chg']:
+                    if col in row and pd.notna(row[col]):
+                        try:
+                            change_pct = float(row[col])
+                            break
+                        except (ValueError, TypeError):
+                            continue
+                
+                # Get price
+                price = None
+                for col in ['最新价', 'price', '现价', '最新']:
+                    if col in row and pd.notna(row[col]):
+                        try:
+                            price = float(row[col])
+                            break
+                        except (ValueError, TypeError):
+                            continue
+                
+                if code and name:
+                    result.append({
+                        'code': code,
+                        'name': name,
+                        'change_pct': change_pct if change_pct is not None else 0.0,
+                        'price': price,
+                        'sector': sector_name
+                    })
+            
+            # Sort by change_pct descending
+            result.sort(key=lambda x: x.get('change_pct', 0.0), reverse=True)
+            
+            logger.info(f"[Akshare] 板块 '{sector_name}' 获取到 {len(result)} 只成分股")
+            return result
+            
+        except Exception as e:
+            logger.error(f"[Akshare] 获取板块 '{sector_name}' 成分股失败: {e}")
+            return []
+
 
 if __name__ == "__main__":
     # 测试代码
