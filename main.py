@@ -528,45 +528,25 @@ def main() -> int:
             )
             return 0
         
-        # 模式2: 实时监控模式
+        # 模式2: 实时监控模式（与基于 STOCK_LIST 的正常分析互斥）
         if args.realtime_monitor or config.realtime_monitor_enabled:
-            logger.info("模式: 实时监控")
+            logger.info("=" * 60)
+            logger.info("模式: 实时监控（仅监控模式，不执行基于 STOCK_LIST 的正常分析）")
+            logger.info("=" * 60)
             logger.info(f"监控间隔: {config.realtime_monitor_interval} 分钟")
             logger.info(f"TopK: {config.realtime_monitor_topk}")
             logger.info(f"监控类型: {config.realtime_monitor_type}")
+            logger.info("注意：实时监控模式与基于 STOCK_LIST 的正常分析是互斥的")
+            logger.info("     如需执行正常分析，请不使用 --realtime-monitor 参数")
             
             from src.core.realtime_monitor import RealtimeStockMonitor
             
             monitor = RealtimeStockMonitor(config)
             
-            # 如果同时启用了定时任务，需要在后台线程运行监控
-            if args.schedule or config.schedule_enabled:
-                import threading
-                logger.info("检测到定时任务模式，实时监控将在后台线程运行")
-                
-                def run_monitor():
-                    try:
-                        monitor.run()
-                    except Exception as e:
-                        logger.exception(f"实时监控线程异常: {e}")
-                
-                monitor_thread = threading.Thread(target=run_monitor, daemon=True)
-                monitor_thread.start()
-                
-                # 继续执行定时任务逻辑
-                from src.scheduler import run_with_schedule
-                
-                def scheduled_task():
-                    run_full_analysis(config, args, stock_codes)
-                
-                run_with_schedule(
-                    task=scheduled_task,
-                    schedule_time=config.schedule_time,
-                    run_immediately=True
-                )
-            else:
-                # 仅实时监控模式，阻塞运行
-                monitor.run()
+            # 实时监控模式：仅执行监控任务，不执行基于 STOCK_LIST 的正常分析
+            # 实时监控内部已有自己的调度逻辑（每N分钟执行一次），无需外部定时任务
+            logger.info("实时监控模式：仅执行监控任务，不执行基于 STOCK_LIST 的正常股票分析")
+            monitor.run()
             
             return 0
         

@@ -1530,12 +1530,13 @@ class AkshareFetcher(BaseFetcher):
             logger.error(f"[Akshare] 新浪接口获取板块排行也失败: {e}")
             return None
 
-    def get_sector_constituent_stocks(self, sector_name: str) -> List[Dict[str, Any]]:
+    def get_sector_constituent_stocks(self, sector_name: str, sectors_df: Optional[pd.DataFrame] = None) -> List[Dict[str, Any]]:
         """
         Get constituent stocks of a sector/industry.
         
         Args:
             sector_name: Sector/industry name (e.g., "芯片", "新能源")
+            sectors_df: Optional pre-fetched sector list DataFrame to avoid repeated API calls
             
         Returns:
             List of stock dicts with keys: code, name, change_pct, etc.
@@ -1547,9 +1548,14 @@ class AkshareFetcher(BaseFetcher):
             self._set_random_user_agent()
             self._enforce_rate_limit()
             
-            # First, get sector list to find the symbol
-            logger.info(f"[API调用] 查找板块 '{sector_name}' 的代码...")
-            df_sectors = ak.stock_board_industry_name_em()
+            # Use provided sectors_df or fetch it
+            if sectors_df is None:
+                # First, get sector list to find the symbol
+                logger.info(f"[API调用] 查找板块 '{sector_name}' 的代码...")
+                df_sectors = ak.stock_board_industry_name_em()
+            else:
+                df_sectors = sectors_df
+                logger.debug(f"[缓存复用] 使用已获取的板块列表查找 '{sector_name}'")
             
             if df_sectors is None or df_sectors.empty:
                 logger.warning(f"[Akshare] 无法获取板块列表")

@@ -204,13 +204,24 @@ class RealtimeStockMonitor:
             logger.error("未找到支持获取板块成分股的数据源")
             return []
         
+        # 优化：先获取一次板块列表，避免每个板块都调用一次
+        import akshare as ak
+        sectors_df = None
+        try:
+            logger.info("[API调用] 一次性获取板块列表（供多个板块复用）...")
+            sectors_df = ak.stock_board_industry_name_em()
+            logger.info(f"[优化] 已获取板块列表，共 {len(sectors_df) if sectors_df is not None else 0} 个板块")
+        except Exception as e:
+            logger.warning(f"获取板块列表失败，将逐个获取: {e}")
+        
         for sector in sectors:
             sector_name = sector.get('name', '')
             if not sector_name:
                 continue
             
             try:
-                stocks = akshare_fetcher.get_sector_constituent_stocks(sector_name)
+                # 传递已获取的板块列表，避免重复调用
+                stocks = akshare_fetcher.get_sector_constituent_stocks(sector_name, sectors_df=sectors_df)
                 for stock in stocks:
                     stock['sector'] = sector_name
                     stock['sector_change_pct'] = sector.get('change_pct', 0)
