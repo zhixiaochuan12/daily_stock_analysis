@@ -406,9 +406,12 @@ class RealtimeStockMonitor:
         logger.info(f"下次执行: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         logger.info("=" * 60)
         
-        # 立即执行一次（如果当前是交易时段）
+        # 立即执行一次（如果当前是交易时段或 debug 模式）
         if self.is_trading_hours():
-            logger.info("当前在交易时段，立即执行一次监控")
+            if self.config.debug:
+                logger.info("⚠️  [测试模式] Debug 模式已启用，立即执行一次监控（忽略交易时段限制）")
+            else:
+                logger.info("当前在交易时段，立即执行一次监控")
             self._run_monitoring_cycle()
         else:
             logger.info("当前不在交易时段，等待下次执行")

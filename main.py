@@ -407,6 +407,9 @@ def main() -> int:
 
     # 加载配置（在设置日志前加载，以获取日志目录）
     config = get_config()
+    
+    # 将命令行参数中的 debug 设置到 config 中（用于实时监控等模块）
+    config.debug = args.debug
 
     # 配置日志（输出到控制台和文件）
     setup_logging(log_prefix="stock_analysis", debug=args.debug, log_dir=config.log_dir)
