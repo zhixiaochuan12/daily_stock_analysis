@@ -904,15 +904,32 @@ class DataFetcherManager:
                 continue
         return {}
 
-    def get_sector_rankings(self, n: int = 5) -> Tuple[List[Dict], List[Dict]]:
-        """获取板块涨跌榜（自动切换数据源）"""
+    def get_sector_rankings(self, n: int = 5, market: str = 'A') -> Tuple[List[Dict], List[Dict]]:
+        """
+        获取板块涨跌榜（自动切换数据源）
+        
+        Args:
+            n: 返回前N个板块
+            market: 市场类型，'A'(A股), 'HK'(港股), 'US'(美股)
+        """
         for fetcher in self._fetchers:
             try:
-                data = fetcher.get_sector_rankings(n)
-                if data:
-                    logger.info(f"[{fetcher.name}] 获取板块排行成功")
-                    return data
+                # 检查fetcher是否支持market参数
+                if hasattr(fetcher, 'get_sector_rankings'):
+                    import inspect
+                    sig = inspect.signature(fetcher.get_sector_rankings)
+                    if 'market' in sig.parameters:
+                        data = fetcher.get_sector_rankings(n, market=market)
+                    else:
+                        # 兼容旧接口（只支持A股）
+                        if market == 'A':
+                            data = fetcher.get_sector_rankings(n)
+                        else:
+                            continue  # 跳过不支持的市场
+                    if data:
+                        logger.info(f"[{fetcher.name}] 获取{market}股板块排行成功")
+                        return data
             except Exception as e:
-                logger.warning(f"[{fetcher.name}] 获取板块排行失败: {e}")
+                logger.warning(f"[{fetcher.name}] 获取{market}股板块排行失败: {e}")
                 continue
         return [], []

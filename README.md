@@ -134,8 +134,14 @@
 | `REALTIME_MONITOR_TYPE` | 监控类型：`gainers`(涨幅) / `losers`(跌幅) / `both`(涨跌) | `both` |
 | `REALTIME_MONITOR_TRADING_HOURS_ONLY` | 仅交易时段运行 | `true` |
 | `REALTIME_MONITOR_MIN_CHANGE_PCT` | 最小涨跌幅阈值（%） | `3.0` |
+| `REALTIME_MONITOR_MARKETS` | 监控市场：`A`(A股) / `HK`(港股) / `US`(美股)，支持多个用逗号分隔，如 `A,HK` | `A` |
 
 > 实时监控功能会定期扫描热门板块，自动识别涨跌幅TopK股票并触发分析。可与定时任务模式同时运行。
+> 
+> **多市场支持**：
+> - A股：使用AKShare获取板块排行和成分股（完整支持）
+> - 港股：使用AKShare获取实时行情，按行业/涨跌幅分组（部分支持）
+> - 美股：需要额外的API支持（当前暂不支持板块排行）
 
 </details>
 

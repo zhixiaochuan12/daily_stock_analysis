@@ -18,10 +18,13 @@ from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Any, Optional
 from threading import Lock
 
+import pandas as pd
+
 from src.config import Config
 from src.core.pipeline import StockAnalysisPipeline
 from src.enums import ReportType
 from data_provider import DataFetcherManager
+from data_provider.realtime_types import safe_float
 from src.scheduler import GracefulShutdown
 
 logger = logging.getLogger(__name__)
@@ -62,6 +65,7 @@ class RealtimeStockMonitor:
         logger.info(f"TopK: {config.realtime_monitor_topk}")
         logger.info(f"热门板块数: {config.realtime_monitor_hot_sectors_num}")
         logger.info(f"监控类型: {config.realtime_monitor_type}")
+        logger.info(f"监控市场: {', '.join(config.realtime_monitor_markets)} (A=A股, HK=港股, US=美股)")
         logger.info(f"仅交易时段: {config.realtime_monitor_trading_hours_only}")
         logger.info(f"最小涨跌幅阈值: {config.realtime_monitor_min_change_pct}%")
         if config.debug:
@@ -155,25 +159,41 @@ class RealtimeStockMonitor:
         """
         获取热门板块（涨幅/跌幅前N）
         
+        支持多市场：A股/港股/美股
+        
         Returns:
-            板块列表，每个包含 name 和 change_pct
+            板块列表，每个包含 name, change_pct, market
         """
         try:
             n = self.config.realtime_monitor_hot_sectors_num
-            top_sectors, bottom_sectors = self.fetcher_manager.get_sector_rankings(n)
+            markets = self.config.realtime_monitor_markets
             
             result = []
             
-            # 根据监控类型添加板块
-            if self.config.realtime_monitor_type in ('gainers', 'both'):
-                result.extend(top_sectors)
+            # 遍历每个市场
+            for market in markets:
+                market = market.upper()
+                logger.info(f"获取{market}股热门板块...")
+                
+                try:
+                    top_sectors, bottom_sectors = self.fetcher_manager.get_sector_rankings(n, market=market)
+                    
+                    # 根据监控类型添加板块
+                    if self.config.realtime_monitor_type in ('gainers', 'both'):
+                        result.extend(top_sectors or [])
+                    
+                    if self.config.realtime_monitor_type in ('losers', 'both'):
+                        result.extend(bottom_sectors or [])
+                    
+                    logger.info(f"{market}股获取到 {len(top_sectors or []) + len(bottom_sectors or [])} 个热门板块")
+                except Exception as e:
+                    logger.warning(f"获取{market}股热门板块失败: {e}")
+                    continue
             
-            if self.config.realtime_monitor_type in ('losers', 'both'):
-                result.extend(bottom_sectors)
-            
-            logger.info(f"获取到 {len(result)} 个热门板块")
+            logger.info(f"总共获取到 {len(result)} 个热门板块（跨市场）")
             for sector in result:
-                logger.info(f"  - {sector.get('name')}: {sector.get('change_pct', 0):.2f}%")
+                market_label = sector.get('market', 'A')
+                logger.info(f"  - [{market_label}股] {sector.get('name')}: {sector.get('change_pct', 0):.2f}%")
             
             return result
             
@@ -185,53 +205,182 @@ class RealtimeStockMonitor:
         """
         从热门板块获取成分股
         
+        支持多市场：A股/港股/美股
+        
         Args:
-            sectors: 板块列表
+            sectors: 板块列表，每个包含 name, change_pct, market
             
         Returns:
-            股票列表，每个包含 code, name, change_pct, sector
+            股票列表，每个包含 code, name, change_pct, sector, market
         """
         all_stocks = []
         
-        # 获取 akshare_fetcher 实例
-        akshare_fetcher = None
-        for fetcher in self.fetcher_manager._fetchers:
-            if hasattr(fetcher, 'get_sector_constituent_stocks'):
-                akshare_fetcher = fetcher
-                break
-        
-        if not akshare_fetcher:
-            logger.error("未找到支持获取板块成分股的数据源")
-            return []
-        
-        # 优化：先获取一次板块列表，避免每个板块都调用一次
-        import akshare as ak
-        sectors_df = None
-        try:
-            logger.info("[API调用] 一次性获取板块列表（供多个板块复用）...")
-            sectors_df = ak.stock_board_industry_name_em()
-            logger.info(f"[优化] 已获取板块列表，共 {len(sectors_df) if sectors_df is not None else 0} 个板块")
-        except Exception as e:
-            logger.warning(f"获取板块列表失败，将逐个获取: {e}")
-        
+        # 按市场分组处理
+        sectors_by_market = {}
         for sector in sectors:
-            sector_name = sector.get('name', '')
-            if not sector_name:
-                continue
+            market = sector.get('market', 'A').upper()
+            if market not in sectors_by_market:
+                sectors_by_market[market] = []
+            sectors_by_market[market].append(sector)
+        
+        # 处理A股板块
+        if 'A' in sectors_by_market:
+            a_sectors = sectors_by_market['A']
+            akshare_fetcher = None
+            for fetcher in self.fetcher_manager._fetchers:
+                if hasattr(fetcher, 'get_sector_constituent_stocks'):
+                    akshare_fetcher = fetcher
+                    break
             
+            if akshare_fetcher:
+                # 优化：先获取一次板块列表，避免每个板块都调用一次
+                import akshare as ak
+                sectors_df = None
+                try:
+                    logger.info("[API调用] 一次性获取A股板块列表（供多个板块复用）...")
+                    sectors_df = ak.stock_board_industry_name_em()
+                    logger.info(f"[优化] 已获取A股板块列表，共 {len(sectors_df) if sectors_df is not None else 0} 个板块")
+                except Exception as e:
+                    logger.warning(f"获取A股板块列表失败，将逐个获取: {e}")
+                
+                for sector in a_sectors:
+                    sector_name = sector.get('name', '').replace('(A股)', '').strip()
+                    if not sector_name:
+                        continue
+                    
+                    try:
+                        stocks = akshare_fetcher.get_sector_constituent_stocks(sector_name, sectors_df=sectors_df)
+                        for stock in stocks:
+                            stock['sector'] = sector_name
+                            stock['sector_change_pct'] = sector.get('change_pct', 0)
+                            stock['market'] = 'A'
+                        all_stocks.extend(stocks)
+                        logger.debug(f"[A股] 板块 '{sector_name}' 获取到 {len(stocks)} 只股票")
+                    except Exception as e:
+                        logger.warning(f"[A股] 获取板块 '{sector_name}' 成分股失败: {e}")
+                        continue
+        
+        # 处理港股板块
+        if 'HK' in sectors_by_market:
+            hk_sectors = sectors_by_market['HK']
             try:
-                # 传递已获取的板块列表，避免重复调用
-                stocks = akshare_fetcher.get_sector_constituent_stocks(sector_name, sectors_df=sectors_df)
-                for stock in stocks:
-                    stock['sector'] = sector_name
-                    stock['sector_change_pct'] = sector.get('change_pct', 0)
-                all_stocks.extend(stocks)
-                logger.debug(f"板块 '{sector_name}' 获取到 {len(stocks)} 只股票")
+                hk_stocks = self._get_hk_stocks_from_sectors(hk_sectors)
+                all_stocks.extend(hk_stocks)
             except Exception as e:
-                logger.warning(f"获取板块 '{sector_name}' 成分股失败: {e}")
-                continue
+                logger.error(f"获取港股成分股失败: {e}")
+        
+        # 处理美股板块
+        if 'US' in sectors_by_market:
+            us_sectors = sectors_by_market['US']
+            try:
+                us_stocks = self._get_us_stocks_from_sectors(us_sectors)
+                all_stocks.extend(us_stocks)
+            except Exception as e:
+                logger.error(f"获取美股成分股失败: {e}")
         
         return all_stocks
+    
+    def _get_hk_stocks_from_sectors(self, sectors: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        从港股板块获取成分股
+        
+        由于港股可能没有板块成分股接口，这里获取全市场数据后按涨跌幅筛选
+        """
+        import akshare as ak
+        
+        try:
+            logger.info("[API调用] 获取港股全市场实时行情...")
+            # 获取 akshare_fetcher 来使用防封禁策略
+            akshare_fetcher = None
+            for fetcher in self.fetcher_manager._fetchers:
+                if hasattr(fetcher, '_set_random_user_agent'):
+                    akshare_fetcher = fetcher
+                    break
+            
+            if akshare_fetcher:
+                akshare_fetcher._set_random_user_agent()
+                akshare_fetcher._enforce_rate_limit()
+            
+            df = ak.stock_hk_spot_em()
+            
+            if df is None or df.empty:
+                logger.warning("[港股] 实时行情数据为空")
+                return []
+            
+            # 获取涨跌幅列
+            change_col = None
+            for col in ['涨跌幅', 'change_pct', '涨幅', 'pct_chg']:
+                if col in df.columns:
+                    change_col = col
+                    break
+            
+            if not change_col:
+                return []
+            
+            df[change_col] = pd.to_numeric(df[change_col], errors='coerce')
+            df = df.dropna(subset=[change_col])
+            
+            result = []
+            for sector in sectors:
+                sector_name = sector.get('name', '')
+                sector_change_pct = sector.get('change_pct', 0)
+                
+                # 如果是虚拟板块（如"港股涨幅区间"），按涨跌幅范围筛选
+                if '区间' in sector_name:
+                    # 获取该涨跌幅附近的股票
+                    threshold = abs(sector_change_pct)
+                    filtered = df[
+                        (df[change_col] >= sector_change_pct - 1.0) & 
+                        (df[change_col] <= sector_change_pct + 1.0)
+                    ]
+                else:
+                    # 如果有行业字段，按行业筛选
+                    industry_col = None
+                    for col in ['行业', 'industry', '行业分类']:
+                        if col in df.columns:
+                            industry_col = col
+                            break
+                    
+                    if industry_col and sector_name.replace('(港股)', '').strip() in df[industry_col].values:
+                        filtered = df[df[industry_col] == sector_name.replace('(港股)', '').strip()]
+                    else:
+                        # 无法匹配，跳过
+                        continue
+                
+                # 转换为统一格式
+                for _, row in filtered.iterrows():
+                    code = str(row.get('代码', '')).strip()
+                    name = str(row.get('名称', '')).strip()
+                    change_pct = float(row.get(change_col, 0))
+                    
+                    if code and name:
+                        result.append({
+                            'code': f"hk{code.zfill(5)}",
+                            'name': name,
+                            'change_pct': change_pct,
+                            'price': safe_float(row.get('最新价')),
+                            'sector': sector_name,
+                            'sector_change_pct': sector_change_pct,
+                            'market': 'HK'
+                        })
+            
+            logger.info(f"[港股] 获取到 {len(result)} 只股票")
+            return result
+            
+        except Exception as e:
+            logger.error(f"[港股] 获取成分股失败: {e}")
+            return []
+    
+    def _get_us_stocks_from_sectors(self, sectors: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        从美股板块获取成分股
+        
+        使用yfinance获取美股数据
+        """
+        # 美股板块功能需要额外的API支持
+        # 这里返回空，实际应该实现完整的美股sector获取逻辑
+        logger.warning("[美股] 美股板块成分股获取功能需要额外的API支持，当前返回空")
+        return []
     
     def _select_topk_stocks(self, stocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
@@ -415,7 +564,7 @@ class RealtimeStockMonitor:
             self._run_monitoring_cycle()
         else:
             logger.info("当前不在交易时段，等待下次执行")
-        
+          
         # 主循环
         while not self.shutdown_handler.should_shutdown:
             schedule.run_pending()

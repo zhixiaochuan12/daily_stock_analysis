@@ -179,6 +179,7 @@ class Config:
     realtime_monitor_type: str = "both"       # 监控类型: gainers/losers/both
     realtime_monitor_trading_hours_only: bool = True  # 仅交易时段运行
     realtime_monitor_min_change_pct: float = 3.0  # 最小涨跌幅阈值（%）
+    realtime_monitor_markets: List[str] = field(default_factory=lambda: ['A'])  # 监控市场: A(股)/HK(港股)/US(美股)，支持多个，如 ['A', 'HK']
 
     # === 实时行情增强数据配置 ===
     # 实时行情开关（关闭后使用历史收盘价进行分析）
@@ -462,7 +463,8 @@ class Config:
             realtime_monitor_hot_sectors_num=int(os.getenv('REALTIME_MONITOR_HOT_SECTORS_NUM', '3')),
             realtime_monitor_type=os.getenv('REALTIME_MONITOR_TYPE', 'both').lower(),
             realtime_monitor_trading_hours_only=os.getenv('REALTIME_MONITOR_TRADING_HOURS_ONLY', 'true').lower() == 'true',
-            realtime_monitor_min_change_pct=float(os.getenv('REALTIME_MONITOR_MIN_CHANGE_PCT', '3.0'))
+            realtime_monitor_min_change_pct=float(os.getenv('REALTIME_MONITOR_MIN_CHANGE_PCT', '3.0')),
+            realtime_monitor_markets=[m.strip().upper() for m in os.getenv('REALTIME_MONITOR_MARKETS', 'A').split(',') if m.strip()]
         )
     
     @classmethod

@@ -1448,9 +1448,37 @@ class AkshareFetcher(BaseFetcher):
             stats['total_amount'] = df[amount_col].sum() / 1e8
         return stats
 
-    def get_sector_rankings(self, n: int = 5) -> Optional[Tuple[List[Dict], List[Dict]]]:
+    def get_sector_rankings(self, n: int = 5, market: str = 'A') -> Optional[Tuple[List[Dict], List[Dict]]]:
         """
         获取板块涨跌榜
+
+        Args:
+            n: 返回前N个板块
+            market: 市场类型，'A'(A股), 'HK'(港股), 'US'(美股)
+        
+        数据源优先级：
+        1. 东财接口 (ak.stock_board_industry_name_em) - 仅A股
+        2. 新浪接口 (ak.stock_sector_spot) - 仅A股
+        3. 港股/美股：获取全市场数据后按涨跌幅排序
+        """
+        market = market.upper()
+        
+        # A股使用现有逻辑
+        if market == 'A':
+            return self._get_a_stock_sector_rankings(n)
+        # 港股
+        elif market == 'HK':
+            return self._get_hk_stock_sector_rankings(n)
+        # 美股
+        elif market == 'US':
+            return self._get_us_stock_sector_rankings(n)
+        else:
+            logger.warning(f"不支持的市场类型: {market}")
+            return None
+    
+    def _get_a_stock_sector_rankings(self, n: int = 5) -> Optional[Tuple[List[Dict], List[Dict]]]:
+        """
+        获取A股板块涨跌榜
 
         数据源优先级：
         1. 东财接口 (ak.stock_board_industry_name_em)
@@ -1463,7 +1491,7 @@ class AkshareFetcher(BaseFetcher):
             self._set_random_user_agent()
             self._enforce_rate_limit()
 
-            logger.info("[API调用] ak.stock_board_industry_name_em() 获取板块排行...")
+            logger.info("[API调用] ak.stock_board_industry_name_em() 获取A股板块排行...")
             df = ak.stock_board_industry_name_em()
             if df is not None and not df.empty:
                 change_col = '涨跌幅'
@@ -1474,26 +1502,26 @@ class AkshareFetcher(BaseFetcher):
                     # 涨幅前n
                     top = df.nlargest(n, change_col)
                     top_sectors = [
-                        {'name': row['板块名称'], 'change_pct': row[change_col]}
+                        {'name': row['板块名称'], 'change_pct': row[change_col], 'market': 'A'}
                         for _, row in top.iterrows()
                     ]
 
                     bottom = df.nsmallest(n, change_col)
                     bottom_sectors = [
-                        {'name': row['板块名称'], 'change_pct': row[change_col]}
+                        {'name': row['板块名称'], 'change_pct': row[change_col], 'market': 'A'}
                         for _, row in bottom.iterrows()
                     ]
 
                     return top_sectors, bottom_sectors
         except Exception as e:
-            logger.warning(f"[Akshare] 东财接口获取板块排行失败: {e}，尝试新浪接口")
+            logger.warning(f"[Akshare] 东财接口获取A股板块排行失败: {e}，尝试新浪接口")
 
         # 东财失败后，尝试新浪接口
         try:
             self._set_random_user_agent()
             self._enforce_rate_limit()
 
-            logger.info("[API调用] ak.stock_sector_spot() 获取板块排行(新浪)...")
+            logger.info("[API调用] ak.stock_sector_spot() 获取A股板块排行(新浪)...")
             df = ak.stock_sector_spot(indicator='新浪行业')
             if df is None or df.empty:
                 return None
@@ -1518,16 +1546,133 @@ class AkshareFetcher(BaseFetcher):
             top = df.nlargest(n, change_col)
             bottom = df.nsmallest(n, change_col)
             top_sectors = [
-                {'name': str(row[name_col]), 'change_pct': float(row[change_col])}
+                {'name': str(row[name_col]), 'change_pct': float(row[change_col]), 'market': 'A'}
                 for _, row in top.iterrows()
             ]
             bottom_sectors = [
-                {'name': str(row[name_col]), 'change_pct': float(row[change_col])}
+                {'name': str(row[name_col]), 'change_pct': float(row[change_col]), 'market': 'A'}
                 for _, row in bottom.iterrows()
             ]
             return top_sectors, bottom_sectors
         except Exception as e:
-            logger.error(f"[Akshare] 新浪接口获取板块排行也失败: {e}")
+            logger.error(f"[Akshare] 新浪接口获取A股板块排行也失败: {e}")
+            return None
+    
+    def _get_hk_stock_sector_rankings(self, n: int = 5) -> Optional[Tuple[List[Dict], List[Dict]]]:
+        """
+        获取港股板块涨跌榜
+        
+        由于AKShare没有港股板块排行接口，这里获取所有港股实时行情，
+        然后按行业分组（如果有行业字段）或直接按涨跌幅排序
+        """
+        import akshare as ak
+        
+        try:
+            self._set_random_user_agent()
+            self._enforce_rate_limit()
+            
+            logger.info("[API调用] ak.stock_hk_spot_em() 获取港股实时行情...")
+            df = ak.stock_hk_spot_em()
+            
+            if df is None or df.empty:
+                logger.warning("[Akshare] 港股实时行情数据为空")
+                return None
+            
+            # 获取涨跌幅列
+            change_col = None
+            for col in ['涨跌幅', 'change_pct', '涨幅', 'pct_chg']:
+                if col in df.columns:
+                    change_col = col
+                    break
+            
+            if not change_col:
+                logger.warning("[Akshare] 港股数据中未找到涨跌幅字段")
+                return None
+            
+            # 转换为数值
+            df[change_col] = pd.to_numeric(df[change_col], errors='coerce')
+            df = df.dropna(subset=[change_col])
+            
+            # 尝试按行业分组（如果有行业字段）
+            industry_col = None
+            for col in ['行业', 'industry', '行业分类', '所属行业']:
+                if col in df.columns:
+                    industry_col = col
+                    break
+            
+            if industry_col:
+                # 按行业分组，计算平均涨跌幅
+                sector_stats = df.groupby(industry_col)[change_col].agg(['mean', 'count']).reset_index()
+                sector_stats.columns = ['name', 'change_pct', 'count']
+                sector_stats = sector_stats[sector_stats['count'] >= 5]  # 至少5只股票
+                
+                top = sector_stats.nlargest(n, 'change_pct')
+                bottom = sector_stats.nsmallest(n, 'change_pct')
+                
+                top_sectors = [
+                    {'name': f"{row['name']}(港股)", 'change_pct': float(row['change_pct']), 'market': 'HK'}
+                    for _, row in top.iterrows()
+                ]
+                bottom_sectors = [
+                    {'name': f"{row['name']}(港股)", 'change_pct': float(row['change_pct']), 'market': 'HK'}
+                    for _, row in bottom.iterrows()
+                ]
+            else:
+                # 没有行业字段，直接按涨跌幅排序，创建虚拟板块
+                # 将股票按涨跌幅区间分组
+                df['sector_range'] = pd.cut(df[change_col], bins=10, labels=False)
+                sector_stats = df.groupby('sector_range')[change_col].mean().reset_index()
+                sector_stats.columns = ['range', 'change_pct']
+                
+                top = sector_stats.nlargest(n, 'change_pct')
+                bottom = sector_stats.nsmallest(n, 'change_pct')
+                
+                top_sectors = [
+                    {'name': f"港股涨幅区间{int(row['range'])}", 'change_pct': float(row['change_pct']), 'market': 'HK'}
+                    for _, row in top.iterrows()
+                ]
+                bottom_sectors = [
+                    {'name': f"港股跌幅区间{int(row['range'])}", 'change_pct': float(row['change_pct']), 'market': 'HK'}
+                    for _, row in bottom.iterrows()
+                ]
+            
+            logger.info(f"[Akshare] 获取港股板块排行成功: 涨幅{len(top_sectors)}个, 跌幅{len(bottom_sectors)}个")
+            return top_sectors, bottom_sectors
+            
+        except Exception as e:
+            logger.error(f"[Akshare] 获取港股板块排行失败: {e}")
+            return None
+    
+    def _get_us_stock_sector_rankings(self, n: int = 5) -> Optional[Tuple[List[Dict], List[Dict]]]:
+        """
+        获取美股板块涨跌榜
+        
+        使用yfinance获取美股数据，按sector分组
+        """
+        try:
+            import yfinance as yf
+            
+            logger.info("[API调用] 获取美股主要股票列表...")
+            
+            # 获取主要美股指数成分股（S&P 500）
+            # 这里使用一个简化的方法：获取一些知名美股，按sector分组
+            # 实际应用中可以使用更完整的股票列表
+            
+            # 获取S&P 500成分股列表（通过yfinance）
+            sp500 = yf.Ticker("^GSPC")
+            # 注意：yfinance可能不直接提供成分股列表，这里使用备用方案
+            
+            # 备用方案：使用一些知名美股，按行业分类
+            # 实际应该从更完整的数据源获取
+            logger.warning("[美股] 使用简化方案：获取部分知名美股按sector分组")
+            
+            # 这里返回空，实际应该实现完整的美股sector获取逻辑
+            # 建议使用专门的API如Alpha Vantage或Finnhub
+            logger.warning("[美股] 美股板块排行功能需要额外的API支持，当前返回空")
+            return None, None
+            
+        except Exception as e:
+            logger.error(f"[美股] 获取美股板块排行失败: {e}")
             return None
 
     def get_sector_constituent_stocks(self, sector_name: str, sectors_df: Optional[pd.DataFrame] = None) -> List[Dict[str, Any]]:

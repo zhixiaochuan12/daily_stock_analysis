@@ -539,6 +539,7 @@ def main() -> int:
             logger.info(f"监控间隔: {config.realtime_monitor_interval} 分钟")
             logger.info(f"TopK: {config.realtime_monitor_topk}")
             logger.info(f"监控类型: {config.realtime_monitor_type}")
+            logger.info(f"监控市场: {', '.join(config.realtime_monitor_markets)} (A=A股, HK=港股, US=美股)")
             logger.info("注意：实时监控模式与基于 STOCK_LIST 的正常分析是互斥的")
             logger.info("     如需执行正常分析，请不使用 --realtime-monitor 参数")
             
